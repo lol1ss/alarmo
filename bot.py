@@ -41,6 +41,32 @@ def connect_db():
     return conn
 
 
+
+class ResilientDB:
+    """Reconnect on a stale Neon connection and retry the SQL statement."""
+    def __init__(self):
+        self.conn = connect_db()
+
+    def execute(self, query, params=None):
+        for attempt in range(5):
+            try:
+                return self.conn.execute(query, params)
+            except (psycopg.OperationalError, psycopg.InterfaceError) as exc:
+                log.warning('PostgreSQL connection lost (attempt %s/5): %s', attempt + 1, exc)
+                try:
+                    self.conn.close()
+                except Exception:
+                    pass
+                if attempt == 4:
+                    raise
+                import time
+                time.sleep(min(8, 2 ** attempt))
+                self.conn = connect_db()
+
+    def close(self):
+        self.conn.close()
+
+
 def get_last(conn):
     row = conn.execute('SELECT last_id FROM source_state WHERE source=%s', (SOURCE,)).fetchone()
     return row[0] if row else None
@@ -140,15 +166,6 @@ def telegram_entities(entities):
 async def send_copy(session, msg):
     text = msg.message or ''
     entities = telegram_entities(msg.entities)
-    log.info(
-    "Message %s custom emojis: %s",
-    msg.id,
-    [
-        e["custom_emoji_id"]
-        for e in entities
-        if e["type"] == "custom_emoji"
-    ]
-)
     if msg.media:
         with tempfile.TemporaryDirectory(prefix='alarmo_') as folder:
             path = await user.download_media(msg, file=folder)
@@ -224,7 +241,7 @@ async def process(conn, session, msg):
 
 
 async def main():
-    conn = connect_db()
+    conn = ResilientDB()
     await user.start()
     me = await user.get_me()
     if me.bot:
