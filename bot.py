@@ -140,6 +140,15 @@ def telegram_entities(entities):
 async def send_copy(session, msg):
     text = msg.message or ''
     entities = telegram_entities(msg.entities)
+    log.info(
+    "Message %s custom emojis: %s",
+    msg.id,
+    [
+        e["custom_emoji_id"]
+        for e in entities
+        if e["type"] == "custom_emoji"
+    ]
+)
     if msg.media:
         with tempfile.TemporaryDirectory(prefix='alarmo_') as folder:
             path = await user.download_media(msg, file=folder)
