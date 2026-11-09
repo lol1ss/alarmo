@@ -2,11 +2,11 @@
 
 ## Overview
 
-A Telegram user session reads new posts from public channel `@kpszsu`; a separate bot session publishes **new messages**, not forwards, to your channel. No admin privileges are required in the source channel. The bot must be an admin with posting permissions in the destination channel.
+A Telegram user session reads new posts from public channel `@...`; a separate bot session publishes **new messages**, not forwards, to your channel. No admin privileges are required in the source channel. The bot must be an admin with posting permissions in the destination channel.
 
 ## 1. Create a Telegram API application
 
-Visit https://my.telegram.org -> API Development Tools. Obtain `API_ID` and `API_HASH`. Subscribe the user account you intend to use to `@kpszsu`.
+Visit https://my.telegram.org -> API Development Tools. Obtain `API_ID` and `API_HASH`. Subscribe the user account you intend to use to `@...`.
 
 ## 2. Generate the user session locally
 
