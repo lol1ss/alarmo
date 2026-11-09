@@ -3,13 +3,14 @@ import logging
 import mimetypes
 import os
 import random
+import json
 import tempfile
 from pathlib import Path
 
 import aiohttp
 import psycopg
 from telethon import TelegramClient, events, errors
-from telethon.extensions import html
+from telethon.tl import types
 from telethon.sessions import StringSession
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
@@ -89,15 +90,61 @@ async def bot_request(session, method, data, file_path=None, file_field=None):
     return payload['result']
 
 
+def telegram_entities(entities):
+    """Telethon and Bot API both use UTF-16 offsets and lengths."""
+    converted = []
+    for entity in entities or []:
+        item = {'offset': entity.offset, 'length': entity.length}
+        if isinstance(entity, types.MessageEntityCustomEmoji):
+            item.update(type='custom_emoji', custom_emoji_id=str(entity.document_id))
+        elif isinstance(entity, types.MessageEntityBold):
+            item['type'] = 'bold'
+        elif isinstance(entity, types.MessageEntityItalic):
+            item['type'] = 'italic'
+        elif isinstance(entity, types.MessageEntityUnderline):
+            item['type'] = 'underline'
+        elif isinstance(entity, types.MessageEntityStrike):
+            item['type'] = 'strikethrough'
+        elif isinstance(entity, types.MessageEntitySpoiler):
+            item['type'] = 'spoiler'
+        elif isinstance(entity, types.MessageEntityCode):
+            item['type'] = 'code'
+        elif isinstance(entity, types.MessageEntityPre):
+            item.update(type='pre', language=entity.language or '')
+        elif isinstance(entity, types.MessageEntityTextUrl):
+            item.update(type='text_link', url=entity.url)
+        elif isinstance(entity, types.MessageEntityMentionName):
+            item.update(type='text_mention', user={'id': entity.user_id})
+        elif isinstance(entity, types.MessageEntityBlockquote):
+            item.update(type='blockquote', is_collapsed=bool(getattr(entity, 'collapsed', False)))
+        elif isinstance(entity, types.MessageEntityUrl):
+            item['type'] = 'url'
+        elif isinstance(entity, types.MessageEntityEmail):
+            item['type'] = 'email'
+        elif isinstance(entity, types.MessageEntityPhone):
+            item['type'] = 'phone_number'
+        elif isinstance(entity, types.MessageEntityMention):
+            item['type'] = 'mention'
+        elif isinstance(entity, types.MessageEntityHashtag):
+            item['type'] = 'hashtag'
+        elif isinstance(entity, types.MessageEntityCashtag):
+            item['type'] = 'cashtag'
+        elif isinstance(entity, types.MessageEntityBotCommand):
+            item['type'] = 'bot_command'
+        else:
+            continue
+        converted.append(item)
+    return converted
+
+
 async def send_copy(session, msg):
     text = msg.message or ''
-    formatted = html.unparse(text, msg.entities or []) if text else ''
+    entities = telegram_entities(msg.entities)
     if msg.media:
         with tempfile.TemporaryDirectory(prefix='alarmo_') as folder:
             path = await user.download_media(msg, file=folder)
             if not path:
                 raise RuntimeError(f'Unable to download media for message {msg.id}')
-            # The hosted Bot API accepts file uploads up to 50 MB.
             if Path(path).stat().st_size > 50 * 1024 * 1024:
                 raise RuntimeError(f'Media exceeds Bot API 50 MB upload limit: message {msg.id}')
             mime = mimetypes.guess_type(path)[0] or ''
@@ -108,22 +155,27 @@ async def send_copy(session, msg):
             else:
                 method, field = 'sendDocument', 'document'
             data = {'chat_id': TARGET}
-            # Captions are limited to 1024 characters after entity parsing.
-            if text and len(text) <= 1024:
-                data.update(caption=formatted, parse_mode='HTML')
+            # Bot API captions are limited to 1024 characters after parsing.
+            if text and len(text.encode('utf-16-le')) // 2 <= 1024:
+                data['caption'] = text
+                if entities:
+                    data['caption_entities'] = json.dumps(entities, ensure_ascii=False)
             result = await bot_request(session, method, data, path, field)
-            if text and len(text) > 1024:
-                await bot_request(session, 'sendMessage', {
-                    'chat_id': TARGET, 'text': formatted, 'parse_mode': 'HTML',
-                    'disable_web_page_preview': 'true'})
+            if text and len(text.encode('utf-16-le')) // 2 > 1024:
+                await send_text(session, text, entities)
             return result['message_id']
     if text:
-        result = await bot_request(session, 'sendMessage', {
-            'chat_id': TARGET, 'text': formatted, 'parse_mode': 'HTML',
-            'disable_web_page_preview': 'true'})
-        return result['message_id']
+        return await send_text(session, text, entities)
     log.info('Skipping unsupported empty post %s', msg.id)
     return None
+
+
+async def send_text(session, text, entities):
+    data = {'chat_id': TARGET, 'text': text, 'disable_web_page_preview': 'true'}
+    if entities:
+        data['entities'] = json.dumps(entities, ensure_ascii=False)
+    result = await bot_request(session, 'sendMessage', data)
+    return result['message_id']
 
 
 async def process(conn, session, msg):
