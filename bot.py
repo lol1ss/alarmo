@@ -117,7 +117,7 @@ async def main():
     await user.start()
     await bot.start(bot_token=BOT_TOKEN)
     source_entity = await user.get_entity(SOURCE)
-    target_entity = await bot.get_entity(TARGET)
+    target_entity = await bot.get_input_entity(int(TARGET))
     log.info('Connected source=%s target=%s', source_entity.id, target_entity.id)
 
     last = get_last(conn)
